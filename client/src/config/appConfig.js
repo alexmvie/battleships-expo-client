@@ -3,7 +3,7 @@
  */
 
 // App version - update this when making significant changes
-export const APP_VERSION = '1.1.0';
+export const APP_VERSION = '1.1.1';
 
 // Server URL
 export const SERVER_URL = 'https://battleships-expo-p2p.onrender.com';
