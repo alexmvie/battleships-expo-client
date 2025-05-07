@@ -1,0 +1,23 @@
+{
+      "expo": {
+            "name": "Battleship Multiplayer",
+            "slug": "battleship-multiplayer",
+            "version": "1.0.0",
+            "orientation": "portrait",
+            "userInterfaceStyle": "light",
+            "splash": {
+                  "resizeMode": "contain",
+                  "backgroundColor": "#f0f8ff"
+            },
+            "assetBundlePatterns": ["**/*"],
+            "ios": {
+                  "supportsTablet": true
+            },
+            "android": {
+                  "adaptiveIcon": {
+                        "backgroundColor": "#f0f8ff"
+                  }
+            },
+            "sdkVersion": "49.0.0"
+      }
+}
