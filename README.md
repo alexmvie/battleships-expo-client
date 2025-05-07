@@ -71,6 +71,8 @@ The Socket.io server is deployed on Render.com at:
 https://battleships-expo-p2p.onrender.com
 ```
 
+The server code is available at: https://github.com/alexmvie/battleships-expo-socket--server
+
 To deploy your own instance:
 
 1. Create a new Web Service on Render.com
