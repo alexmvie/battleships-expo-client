@@ -1,4 +1,6 @@
 // Import socket.io-client directly
+// Server code repository: https://github.com/alexmvie/battleships-expo-socket--server
+// Client code repository: https://github.com/alexmvie/battleships-expo-socket--client
 import { io } from 'socket.io-client';
 import { Alert, Platform } from 'react-native';
 

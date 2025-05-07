@@ -21,19 +21,25 @@ A mobile-friendly multiplayer Battleship game built with React Native and Expo, 
 
 ### Client Setup
 
-1. Install dependencies:
+1. Navigate to the client directory:
+
+      ```
+      cd client
+      ```
+
+2. Install dependencies:
 
       ```
       npm install
       ```
 
-2. Start the development server:
+3. Start the development server:
 
       ```
       npm start
       ```
 
-3. Open the app in a web browser:
+4. Open the app in a web browser:
       ```
       npm run web
       ```

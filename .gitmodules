@@ -1,0 +1,3 @@
+[submodule "server"]
+	path = server
+	url = https://github.com/alexmvie/battleships-expo-socket--server.git
