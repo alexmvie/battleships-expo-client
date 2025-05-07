@@ -3,18 +3,18 @@ import { View, Text, StyleSheet, TouchableOpacity, Alert, Animated, Dimensions, 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { SHIPS, CELL_STATE } from '../utils/gameState';
 import GameBoard from '../components/GameBoard';
-import battleController from '../controllers/BattleController';
+import gameRoomController, { GAME_STATES } from '../controllers/GameRoomController';
 
 const GameScreen = ({ navigation, route }) => {
-      const { isHost, connection, playerBoard } = route.params;
+      const { gameCode, isHost, connection, clientId } = route.params;
 
-      const [opponentBoard, setOpponentBoard] = useState(battleController.getGameState().opponentBoard);
-      const [myBoard, setMyBoard] = useState(battleController.getGameState().playerBoard || playerBoard);
-      const [isMyTurn, setIsMyTurn] = useState(battleController.getGameState().isMyTurn);
-      const [gameOver, setGameOver] = useState(battleController.getGameState().gameOver);
-      const [winner, setWinner] = useState(battleController.getGameState().winner);
-      const [lastAttack, setLastAttack] = useState(battleController.getGameState().lastAttack);
-      const [sunkShips, setSunkShips] = useState(battleController.getGameState().sunkShips);
+      // Local state
+      const [clients, setClients] = useState(gameRoomController.getGameState().clients);
+      const [currentTurnClientId, setCurrentTurnClientId] = useState(gameRoomController.getCurrentTurnClientId());
+      const [selectedTargetId, setSelectedTargetId] = useState(null);
+      const [gameOver, setGameOver] = useState(false);
+      const [winner, setWinner] = useState(null);
+      const [lastAttack, setLastAttack] = useState(null);
       const [reconnecting, setReconnecting] = useState(false);
       const [connectionLost, setConnectionLost] = useState(false);
       const [isLandscape, setIsLandscape] = useState(false);
@@ -23,74 +23,84 @@ const GameScreen = ({ navigation, route }) => {
       const fadeAnim = useRef(new Animated.Value(0)).current;
       const scaleAnim = useRef(new Animated.Value(0.5)).current;
 
-      // Initialize the battle controller
+      // Initialize the game room controller
       useEffect(() => {
-            console.log('Initializing battle controller with gameCode:', route.params.gameCode, 'isHost:', isHost);
-            battleController.initialize(connection, route.params.gameCode, isHost, playerBoard);
+            console.log('GameScreen: Using game room controller with clientId:', clientId);
             
             // Set up event listeners
-            battleController.on('onPlayerBoardUpdated', (newBoard) => {
-                  setMyBoard(newBoard);
-            });
-            
-            battleController.on('onOpponentBoardUpdated', (newBoard) => {
-                  setOpponentBoard(newBoard);
-            });
-            
-            battleController.on('onTurnChanged', (isMyTurn) => {
-                  setIsMyTurn(isMyTurn);
-            });
-            
-            battleController.on('onGameOver', (didWin) => {
-                  setGameOver(true);
-                  setWinner(didWin ? 'player' : 'opponent');
+            gameRoomController.on('onClientLeft', (leftClientId) => {
+                  console.log('Client left:', leftClientId);
+                  setClients(gameRoomController.getGameState().clients);
                   
-                  Alert.alert(
-                        didWin ? 'Victory!' : 'Defeat!', 
-                        didWin ? 'You sunk all enemy ships!' : 'All your ships were sunk!',
-                        [{ text: 'Return to Home', onPress: () => navigation.navigate('Home') }]
-                  );
+                  Alert.alert('Player Left', 'A player has left the game.');
             });
             
-            battleController.on('onLastAttackUpdated', (attack) => {
-                  setLastAttack(attack);
+            gameRoomController.on('onTurnChanged', (turnClientId) => {
+                  console.log('Turn changed to:', turnClientId);
+                  setCurrentTurnClientId(turnClientId);
             });
             
-            battleController.on('onSunkShipsUpdated', (ships) => {
-                  setSunkShips(ships);
+            gameRoomController.on('onBoardUpdated', (clientId, board) => {
+                  console.log('Board updated for client:', clientId);
+                  setClients(gameRoomController.getGameState().clients);
+            });
+            
+            gameRoomController.on('onAttackResult', (targetClientId, row, col, hit, shipId, sunkShipId) => {
+                  console.log('Attack result:', { targetClientId, row, col, hit, shipId, sunkShipId });
+                  setClients(gameRoomController.getGameState().clients);
+                  setLastAttack({ targetClientId, row, col });
                   
-                  // Show alert for sunk ship if it's a new opponent ship
-                  const opponentShips = ships.opponent;
-                  const prevOpponentShips = sunkShips.opponent;
-                  
-                  if (opponentShips.length > prevOpponentShips.length) {
-                        const newSunkShipId = opponentShips[opponentShips.length - 1];
-                        const shipName = Object.values(SHIPS).find((ship) => ship.id === newSunkShipId)?.name;
-                        Alert.alert('Ship Sunk!', `You sunk the opponent's ${shipName}!`);
+                  // Show alert for sunk ship
+                  if (sunkShipId) {
+                        const shipName = Object.values(SHIPS).find((ship) => ship.id === sunkShipId)?.name;
+                        Alert.alert('Ship Sunk!', `You sunk a ${shipName}!`);
                   }
             });
             
-            battleController.on('onConnectionLost', () => {
-                  setConnectionLost(true);
+            gameRoomController.on('onGameOver', (winnerId) => {
+                  console.log('Game over, winner:', winnerId);
+                  setGameOver(true);
+                  setWinner(winnerId);
+                  
+                  const isLocalPlayerWinner = winnerId === clientId;
                   Alert.alert(
-                        'Connection Lost',
-                        'The connection to the other player was lost. The game cannot continue.',
+                        isLocalPlayerWinner ? 'Victory!' : 'Defeat!',
+                        isLocalPlayerWinner ? 'You won the game!' : 'You lost the game!',
                         [{ text: 'Return to Home', onPress: () => navigation.navigate('Home') }]
                   );
             });
+            
+            gameRoomController.on('onConnectionLost', () => {
+                  setConnectionLost(true);
+                  Alert.alert(
+                        'Connection Lost',
+                        'The connection to the other players was lost. The game cannot continue.',
+                        [{ text: 'Return to Home', onPress: () => navigation.navigate('Home') }]
+                  );
+            });
+            
+            // Initialize local state from controller
+            const gameState = gameRoomController.getGameState();
+            setClients(gameState.clients);
+            setCurrentTurnClientId(gameRoomController.getCurrentTurnClientId());
+            
+            // Select the first opponent as the default target
+            const opponents = Object.values(gameState.clients).filter(c => c.id !== clientId);
+            if (opponents.length > 0) {
+                  setSelectedTargetId(opponents[0].id);
+            }
             
             // Clean up
             return () => {
                   // Reset event listeners
-                  battleController.on('onPlayerBoardUpdated', null);
-                  battleController.on('onOpponentBoardUpdated', null);
-                  battleController.on('onTurnChanged', null);
-                  battleController.on('onGameOver', null);
-                  battleController.on('onLastAttackUpdated', null);
-                  battleController.on('onSunkShipsUpdated', null);
-                  battleController.on('onConnectionLost', null);
+                  gameRoomController.on('onClientLeft', null);
+                  gameRoomController.on('onTurnChanged', null);
+                  gameRoomController.on('onBoardUpdated', null);
+                  gameRoomController.on('onAttackResult', null);
+                  gameRoomController.on('onGameOver', null);
+                  gameRoomController.on('onConnectionLost', null);
             };
-      }, [connection, isHost, navigation, playerBoard, route.params.gameCode, sunkShips.opponent]);
+      }, [clientId, navigation]);
 
       // Check orientation
       useEffect(() => {
@@ -165,7 +175,7 @@ const GameScreen = ({ navigation, route }) => {
                                     setConnectionLost(true);
                                     Alert.alert(
                                           'Connection Lost',
-                                          'The connection to the other player was lost. The game cannot continue.',
+                                          'The connection to the other players was lost. The game cannot continue.',
                                           [{ text: 'Return to Home', onPress: () => navigation.navigate('Home') }]
                                     );
                               }
@@ -195,16 +205,31 @@ const GameScreen = ({ navigation, route }) => {
                   fadeAnim.setValue(0);
                   scaleAnim.setValue(0.5);
             };
-      }, [isMyTurn, fadeAnim, scaleAnim]);
+      }, [currentTurnClientId, fadeAnim, scaleAnim]);
 
       const handleCellPress = (row, col) => {
-            // Use the battle controller to attack a cell
-            if (reconnecting || connectionLost) return;
+            // Can only attack on your turn and if game is not over or connection lost
+            if (currentTurnClientId !== clientId || gameOver || connectionLost || reconnecting) {
+                  return;
+            }
             
-            battleController.attackCell(row, col);
+            // Can't attack if no target is selected
+            if (!selectedTargetId) {
+                  Alert.alert('No Target', 'Please select a target player first.');
+                  return;
+            }
+            
+            // Attack the selected target
+            gameRoomController.attackClient(selectedTargetId, row, col);
+      };
+
+      const handleTargetSelect = (targetClientId) => {
+            setSelectedTargetId(targetClientId);
       };
 
       const renderTurnIndicator = () => {
+            const isMyTurn = currentTurnClientId === clientId;
+            
             return (
                   <Animated.View
                         style={[
@@ -216,17 +241,51 @@ const GameScreen = ({ navigation, route }) => {
                               },
                         ]}
                   >
-                        <Text style={styles.turnIndicatorText}>{isMyTurn ? 'YOUR TURN' : "OPPONENT'S TURN"}</Text>
+                        <Text style={styles.turnIndicatorText}>
+                              {isMyTurn 
+                                    ? 'YOUR TURN' 
+                                    : `${currentTurnClientId === clientId 
+                                          ? 'YOUR' 
+                                          : currentTurnClientId.substring(0, 5) + "'S"} TURN`}
+                        </Text>
                   </Animated.View>
             );
       };
 
-      const renderSunkShips = (player) => {
-            const sunkShipsList = sunkShips[player];
+      const renderTargetSelector = () => {
+            // Filter out the local client
+            const opponents = Object.values(clients).filter(client => client.id !== clientId);
+            
+            return (
+                  <View style={styles.targetSelectorContainer}>
+                        <Text style={styles.targetSelectorTitle}>Select Target:</Text>
+                        <View style={styles.targetButtonsContainer}>
+                              {opponents.map((opponent) => (
+                                    <TouchableOpacity
+                                          key={opponent.id}
+                                          style={[
+                                                styles.targetButton,
+                                                selectedTargetId === opponent.id && styles.selectedTargetButton,
+                                          ]}
+                                          onPress={() => handleTargetSelect(opponent.id)}
+                                    >
+                                          <Text style={styles.targetButtonText}>
+                                                Player {opponent.id.substring(0, 5)}
+                                          </Text>
+                                    </TouchableOpacity>
+                              ))}
+                        </View>
+                  </View>
+            );
+      };
+
+      const renderSunkShips = (client) => {
             return (
                   <View style={styles.sunkShipsContainer}>
                         <Text style={styles.sunkShipsTitle}>
-                              {player === 'player' ? 'Your Sunk Ships:' : "Opponent's Sunk Ships:"}
+                              {client.id === clientId 
+                                    ? 'Your Sunk Ships:' 
+                                    : `Player ${client.id.substring(0, 5)}'s Sunk Ships:`}
                         </Text>
                         <View style={styles.sunkShipsList}>
                               {Object.values(SHIPS).map((ship) => (
@@ -234,13 +293,13 @@ const GameScreen = ({ navigation, route }) => {
                                           key={ship.id}
                                           style={[
                                                 styles.sunkShipItem,
-                                                sunkShipsList.includes(ship.id) ? styles.sunkShip : styles.activeShip,
+                                                client.sunkShips.includes(ship.id) ? styles.sunkShip : styles.activeShip,
                                           ]}
                                     >
                                           <Text
                                                 style={[
                                                       styles.sunkShipText,
-                                                      sunkShipsList.includes(ship.id)
+                                                      client.sunkShips.includes(ship.id)
                                                             ? styles.sunkShipText
                                                             : styles.activeShipText,
                                                 ]}
@@ -261,44 +320,56 @@ const GameScreen = ({ navigation, route }) => {
                   </View>
 
                   <View style={styles.content}>
+                        {renderTargetSelector()}
+                        
                         <View style={[styles.boardsContainer, isLandscape && styles.boardsContainerLandscape]}>
                               <View style={styles.boardSection}>
-                                    <Text style={styles.boardTitle}>OPPONENT'S WATERS</Text>
-                                    <GameBoard
-                                          board={opponentBoard}
-                                          onCellPress={handleCellPress}
-                                          showShips={false}
-                                          highlightLastMove={lastAttack?.board === 'opponent' ? lastAttack : null}
-                                          disabled={!isMyTurn || gameOver}
-                                    />
+                                    <Text style={styles.boardTitle}>
+                                          {selectedTargetId 
+                                                ? `PLAYER ${selectedTargetId.substring(0, 5)}'S WATERS` 
+                                                : "SELECT A TARGET"}
+                                    </Text>
+                                    {selectedTargetId && (
+                                          <GameBoard
+                                                board={clients[selectedTargetId]?.board || []}
+                                                onCellPress={handleCellPress}
+                                                showShips={false}
+                                                highlightLastMove={
+                                                      lastAttack?.targetClientId === selectedTargetId ? lastAttack : null
+                                                }
+                                                disabled={currentTurnClientId !== clientId || gameOver}
+                                          />
+                                    )}
                               </View>
 
                               <View style={styles.boardSection}>
                                     <Text style={styles.boardTitle}>YOUR WATERS</Text>
                                     <GameBoard
-                                          board={myBoard}
+                                          board={clients[clientId]?.board || []}
                                           showShips={true}
-                                          highlightLastMove={lastAttack?.board === 'player' ? lastAttack : null}
                                           disabled={true}
                                     />
                               </View>
                         </View>
 
                         <View style={[styles.statsContainer, isLandscape && styles.statsContainerLandscape]}>
-                              {renderSunkShips('opponent')}
-                              {renderSunkShips('player')}
+                              {Object.values(clients).map((client) => renderSunkShips(client))}
                         </View>
                   </View>
 
                   {(gameOver || connectionLost) && (
                         <View style={styles.gameOverContainer}>
                               <Text style={styles.gameOverText}>
-                                    {connectionLost ? 'CONNECTION LOST' : winner === 'player' ? 'VICTORY!' : 'DEFEAT!'}
+                                    {connectionLost 
+                                          ? 'CONNECTION LOST' 
+                                          : winner === clientId 
+                                                ? 'VICTORY!' 
+                                                : 'DEFEAT!'}
                               </Text>
                               <Text style={styles.gameOverSubText}>
                                     {connectionLost
-                                          ? 'The connection to your opponent was lost.'
-                                          : winner === 'player'
+                                          ? 'The connection to the other players was lost.'
+                                          : winner === clientId
                                           ? 'You sunk all enemy ships!'
                                           : 'All your ships were sunk!'}
                               </Text>
@@ -346,6 +417,38 @@ const styles = StyleSheet.create({
             flex: 1,
             padding: 10,
       },
+      targetSelectorContainer: {
+            marginBottom: 15,
+            padding: 10,
+            backgroundColor: '#f1f5f9',
+            borderRadius: 8,
+      },
+      targetSelectorTitle: {
+            fontSize: 16,
+            fontWeight: 'bold',
+            marginBottom: 10,
+      },
+      targetButtonsContainer: {
+            flexDirection: 'row',
+            flexWrap: 'wrap',
+      },
+      targetButton: {
+            backgroundColor: '#2563eb',
+            paddingVertical: 8,
+            paddingHorizontal: 12,
+            borderRadius: 8,
+            marginRight: 10,
+            marginBottom: 10,
+      },
+      selectedTargetButton: {
+            backgroundColor: '#1e3a8a',
+            borderWidth: 2,
+            borderColor: '#fbbf24',
+      },
+      targetButtonText: {
+            color: 'white',
+            fontWeight: 'bold',
+      },
       boardsContainer: {
             flex: 1,
       },
@@ -372,6 +475,7 @@ const styles = StyleSheet.create({
             justifyContent: 'space-between',
             paddingHorizontal: 10,
             marginBottom: 10,
+            flexWrap: 'wrap',
       },
       statsContainerLandscape: {
             position: 'absolute',
@@ -384,6 +488,8 @@ const styles = StyleSheet.create({
       },
       sunkShipsContainer: {
             flex: 1,
+            minWidth: 150,
+            marginBottom: 10,
       },
       sunkShipsTitle: {
             fontSize: 14,
@@ -393,7 +499,7 @@ const styles = StyleSheet.create({
       sunkShipsList: {
             flexDirection: 'row',
             flexWrap: 'wrap',
-            justifyContent: 'center',
+            justifyContent: 'flex-start',
       },
       sunkShipItem: {
             paddingVertical: 4,

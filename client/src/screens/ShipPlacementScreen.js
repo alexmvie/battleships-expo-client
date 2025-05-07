@@ -13,93 +13,105 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { SHIPS } from '../utils/gameState';
 import GameBoard from '../components/GameBoard';
-import gameController from '../controllers/GameController';
+import gameRoomController, { GAME_STATES } from '../controllers/GameRoomController';
 
 const ShipPlacementScreen = ({ navigation, route }) => {
       const { gameCode, isHost, connection } = route.params;
       const window = useWindowDimensions();
-      const [board, setBoard] = useState(gameController.getGameState().board);
+      
+      // Generate a unique client ID
+      const clientId = `client_${Date.now()}`;
+      
+      // Local state
+      const [board, setBoard] = useState(gameRoomController.getGameState().clients[clientId]?.board || null);
       const [selectedShip, setSelectedShip] = useState(SHIPS.CARRIER);
-      const [placedShips, setPlacedShips] = useState(gameController.getGameState().placedShips);
+      const [placedShips, setPlacedShips] = useState([]);
       const [isHorizontal, setIsHorizontal] = useState(true);
-      const [opponentReady, setOpponentReady] = useState(gameController.getGameState().opponentReady);
-      const [playerReady, setPlayerReady] = useState(gameController.getGameState().playerReady);
+      const [playerReady, setPlayerReady] = useState(false);
+      const [allPlayersReady, setAllPlayersReady] = useState(false);
       const [reconnecting, setReconnecting] = useState(false);
       const [isLandscape, setIsLandscape] = useState(false);
-      const [readyButtonDisabled, setReadyButtonDisabled] = useState(playerReady);
+      const [readyButtonDisabled, setReadyButtonDisabled] = useState(false);
+      const [clients, setClients] = useState({});
 
-      // Initialize the game controller
+      // Initialize the game room controller
       useEffect(() => {
-            console.log('Initializing game controller with gameCode:', gameCode, 'isHost:', isHost);
-            gameController.initialize(connection, gameCode, isHost);
+            console.log('Initializing game room controller with gameCode:', gameCode, 'isHost:', isHost);
+            gameRoomController.initialize(connection, gameCode, isHost, clientId);
             
             // Set up event listeners
-            gameController.on('onBoardUpdated', (newBoard) => {
-                  setBoard(newBoard);
+            gameRoomController.on('onClientJoined', (client) => {
+                  console.log('Client joined:', client.id);
+                  setClients(gameRoomController.getGameState().clients);
             });
             
-            gameController.on('onPlacedShipsUpdated', (newPlacedShips) => {
-                  setPlacedShips(newPlacedShips);
+            gameRoomController.on('onClientLeft', (clientId) => {
+                  console.log('Client left:', clientId);
+                  setClients(gameRoomController.getGameState().clients);
                   
-                  // Select next ship or clear selection if all ships are placed
-                  if (newPlacedShips.length > 0) {
-                        selectNextShip(newPlacedShips[newPlacedShips.length - 1]);
+                  Alert.alert('Player Left', 'A player has left the game.');
+            });
+            
+            gameRoomController.on('onClientReadyChanged', (clientId, ready) => {
+                  console.log('Client ready changed:', clientId, ready);
+                  setClients(gameRoomController.getGameState().clients);
+                  
+                  if (clientId !== gameRoomController.localClientId && ready) {
+                        Alert.alert('Player Ready', 'Another player is ready for battle!');
                   }
             });
             
-            gameController.on('onPlayerReadyUpdated', (isReady) => {
-                  setPlayerReady(isReady);
-                  setReadyButtonDisabled(isReady);
-            });
-            
-            gameController.on('onOpponentReadyUpdated', (isReady) => {
-                  setOpponentReady(isReady);
+            gameRoomController.on('onAllClientsReady', () => {
+                  console.log('All clients ready');
+                  setAllPlayersReady(true);
                   
-                  if (isReady) {
-                        Alert.alert('Opponent Ready', 'Your opponent is ready for battle!');
-                  }
-            });
-            
-            gameController.on('onBothPlayersReady', () => {
                   if (isHost) {
-                        Alert.alert('Both Players Ready', 'Both players are ready. You can start the battle!');
+                        Alert.alert('All Players Ready', 'All players are ready. You can start the battle!');
                   } else {
-                        Alert.alert('Both Players Ready', 'Both players are ready. Waiting for host to start the game...');
+                        Alert.alert('All Players Ready', 'All players are ready. Waiting for host to start the game...');
                   }
             });
             
-            gameController.on('onGameStart', () => {
-                  // Navigate to game screen after a short delay
-                  setTimeout(() => {
-                        navigation.navigate('Game', {
-                              gameCode,
-                              isHost,
-                              connection,
-                              playerBoard: gameController.getGameState().board,
-                        });
-                  }, 1000);
+            gameRoomController.on('onGameStateChanged', (state) => {
+                  console.log('Game state changed:', state);
+                  
+                  if (state === GAME_STATES.BATTLE) {
+                        // Navigate to battle screen
+                        setTimeout(() => {
+                              navigation.navigate('Game', {
+                                    gameCode,
+                                    isHost,
+                                    connection,
+                                    clientId,
+                              });
+                        }, 1000);
+                  }
             });
             
-            gameController.on('onConnectionLost', () => {
+            gameRoomController.on('onConnectionLost', () => {
                   Alert.alert(
                         'Connection Lost',
-                        'The connection to the other player was lost. Returning to home screen.',
+                        'The connection to the other players was lost. Returning to home screen.',
                         [{ text: 'OK', onPress: () => navigation.navigate('Home') }]
                   );
             });
             
+            // Initialize local state from controller
+            const gameState = gameRoomController.getGameState();
+            setBoard(gameState.clients[clientId]?.board || null);
+            setClients(gameState.clients);
+            
             // Clean up
             return () => {
                   // Reset event listeners
-                  gameController.on('onBoardUpdated', null);
-                  gameController.on('onPlacedShipsUpdated', null);
-                  gameController.on('onPlayerReadyUpdated', null);
-                  gameController.on('onOpponentReadyUpdated', null);
-                  gameController.on('onBothPlayersReady', null);
-                  gameController.on('onGameStart', null);
-                  gameController.on('onConnectionLost', null);
+                  gameRoomController.on('onClientJoined', null);
+                  gameRoomController.on('onClientLeft', null);
+                  gameRoomController.on('onClientReadyChanged', null);
+                  gameRoomController.on('onAllClientsReady', null);
+                  gameRoomController.on('onGameStateChanged', null);
+                  gameRoomController.on('onConnectionLost', null);
             };
-      }, [connection, gameCode, isHost, navigation]);
+      }, [connection, gameCode, isHost, navigation, clientId]);
 
       // Check orientation
       useEffect(() => {
@@ -173,7 +185,7 @@ const ShipPlacementScreen = ({ navigation, route }) => {
                               if (connection && !connection.isConnected) {
                                     Alert.alert(
                                           'Connection Lost',
-                                          'The connection to the other player was lost. Returning to home screen.',
+                                          'The connection to the other players was lost. Returning to home screen.',
                                           [{ text: 'OK', onPress: () => navigation.navigate('Home') }]
                                     );
                               }
@@ -185,29 +197,24 @@ const ShipPlacementScreen = ({ navigation, route }) => {
       const handleCellPress = (row, col) => {
             if (!selectedShip) return;
             
-            // Use the game controller to place the ship
-            const success = gameController.placeShip(selectedShip, row, col, isHorizontal);
+            // TODO: Implement ship placement using gameRoomController
+            // For now, just update local state
+            console.log('Placing ship at:', row, col);
             
-            if (!success) {
-                  Alert.alert('Invalid Placement', 'You cannot place the ship here. Try another position or orientation.');
+            // If successful, update placed ships
+            setPlacedShips([...placedShips, selectedShip.id]);
+            
+            // Select next ship or clear selection if all ships are placed
+            if (placedShips.length + 1 >= Object.keys(SHIPS).length) {
+                  setSelectedShip(null);
+            } else {
+                  // Find the next unplaced ship
+                  const shipIds = Object.values(SHIPS).map(ship => ship.id);
+                  const nextUnplacedShip = Object.values(SHIPS).find(
+                        ship => !placedShips.includes(ship.id) && ship.id !== selectedShip.id
+                  );
+                  setSelectedShip(nextUnplacedShip || null);
             }
-      };
-
-      const selectNextShip = (currentShipId) => {
-            const shipIds = Object.values(SHIPS).map((ship) => ship.id);
-            const currentIndex = shipIds.indexOf(currentShipId);
-
-            // Find the next unplaced ship
-            for (let i = currentIndex + 1; i < shipIds.length; i++) {
-                  const nextShipId = shipIds[i];
-                  if (!placedShips.includes(nextShipId)) {
-                        setSelectedShip(Object.values(SHIPS).find((ship) => ship.id === nextShipId));
-                        return;
-                  }
-            }
-
-            // If we get here, all ships are placed
-            setSelectedShip(null);
       };
 
       const handleShipSelect = (ship) => {
@@ -221,10 +228,12 @@ const ShipPlacementScreen = ({ navigation, route }) => {
       };
 
       const handleReset = () => {
-            // Use the game controller to reset the game
-            gameController.reset();
+            // Reset ship placement
+            setPlacedShips([]);
             setSelectedShip(SHIPS.CARRIER);
             setIsHorizontal(true);
+            
+            // TODO: Reset board in gameRoomController
       };
 
       const handleReady = () => {
@@ -246,27 +255,35 @@ const ShipPlacementScreen = ({ navigation, route }) => {
                   return;
             }
             
-            // Use the game controller to mark the player as ready
-            const success = gameController.markPlayerReady();
+            // Mark player as ready in the controller
+            const success = gameRoomController.markReady(true);
             
             if (!success) {
-                  Alert.alert('Connection Issue', 'Unable to notify opponent. Please try again.');
+                  Alert.alert('Connection Issue', 'Unable to notify other players. Please try again.');
                   setReadyButtonDisabled(false);
                   return;
             }
             
-            // Show a message based on opponent status
-            if (opponentReady) {
-                  // Both players are ready
-                  if (isHost) {
-                        Alert.alert('Ready!', 'Both players are ready. You can start the battle!');
-                  } else {
-                        Alert.alert('Ready!', 'Both players are ready. Waiting for host to start the game...');
-                  }
-            } else {
-                  // Show a message that we're waiting for opponent
-                  Alert.alert('Ready!', 'Waiting for your opponent to be ready.');
+            // Update local state
+            setPlayerReady(true);
+            
+            // Show a message
+            Alert.alert('Ready!', 'Waiting for other players to be ready.');
+      };
+
+      const handleStartBattle = () => {
+            if (!isHost) {
+                  Alert.alert('Not Host', 'Only the host can start the battle.');
+                  return;
             }
+            
+            if (!allPlayersReady) {
+                  Alert.alert('Not Ready', 'All players must be ready before starting the battle.');
+                  return;
+            }
+            
+            // Start the battle
+            gameRoomController.startBattle();
       };
 
       const renderShipSelector = () => {
@@ -319,34 +336,33 @@ const ShipPlacementScreen = ({ navigation, route }) => {
                   );
             }
       };
-                  );
-            } else {
-                  return (
-                        <View style={styles.shipSelectorContainer}>
-                              {Object.values(SHIPS).map((ship) => (
-                                    <TouchableOpacity
-                                          key={ship.id}
+      const renderPlayerList = () => {
+            return (
+                  <View style={styles.playerListContainer}>
+                        <Text style={styles.playerListTitle}>Players:</Text>
+                        {Object.values(clients).map((client) => (
+                              <View key={client.id} style={styles.playerItem}>
+                                    <Text style={styles.playerName}>
+                                          {client.id === clientId ? 'You' : `Player ${client.id.substring(0, 5)}`}
+                                          {client.isHost ? ' (Host)' : ''}
+                                    </Text>
+                                    <View
                                           style={[
-                                                styles.shipButton,
-                                                selectedShip?.id === ship.id && styles.selectedShipButton,
-                                                placedShips.includes(ship.id) && styles.placedShipButton,
+                                                styles.playerStatus,
+                                                client.ready ? styles.playerReady : styles.playerNotReady,
                                           ]}
-                                          onPress={() => handleShipSelect(ship)}
-                                          disabled={placedShips.includes(ship.id)}
-                                    >
-                                          <Text style={styles.shipButtonText}>{ship.name}</Text>
-                                          <Text style={styles.shipSizeText}>Size: {ship.size}</Text>
-                                    </TouchableOpacity>
-                              ))}
-                        </View>
-                  );
-            }
+                                    />
+                              </View>
+                        ))}
+                  </View>
+            );
       };
       
       return (
             <SafeAreaView style={styles.container}>
                   <View style={styles.header}>
                         <Text style={styles.headerTitle}>PLACE YOUR SHIPS</Text>
+                        <Text style={styles.gameCodeText}>Game Code: {gameCode}</Text>
                   </View>
 
                   <View style={[styles.content, isLandscape && styles.contentLandscape]}>
@@ -391,6 +407,8 @@ const ShipPlacementScreen = ({ navigation, route }) => {
                                     </TouchableOpacity>
                               </View>
 
+                              {renderPlayerList()}
+
                               <TouchableOpacity
                                     style={[
                                           styles.readyButton,
@@ -406,30 +424,21 @@ const ShipPlacementScreen = ({ navigation, route }) => {
                                     }
                               >
                                     <Text style={styles.readyButtonText}>
-                                          {playerReady
-                                                ? opponentReady
-                                                      ? isHost 
-                                                            ? 'START BATTLE!'
-                                                            : 'WAITING FOR HOST...'
-                                                      : 'WAITING FOR OPPONENT...'
-                                                : opponentReady
-                                                ? 'READY TO BATTLE!'
-                                                : 'READY TO BATTLE!'}
+                                          {playerReady ? 'READY!' : 'READY TO BATTLE!'}
                                     </Text>
                               </TouchableOpacity>
                               
-                              {isHost && playerReady && opponentReady && (
+                              {isHost && allPlayersReady && (
                                     <TouchableOpacity
                                           style={[styles.startButton]}
-                                          onPress={() => gameController.startGame()}
+                                          onPress={handleStartBattle}
                                     >
                                           <Text style={styles.readyButtonText}>START BATTLE!</Text>
                                     </TouchableOpacity>
                               )}
 
                               {playerReady && <Text style={styles.readyStatusText}>You are ready for battle!</Text>}
-
-                              {opponentReady && <Text style={styles.opponentReadyText}>Opponent is ready for battle!</Text>}
+                              {allPlayersReady && <Text style={styles.allReadyText}>All players are ready!</Text>}
                         </View>
                   </View>
             </SafeAreaView>
@@ -451,6 +460,11 @@ const styles = StyleSheet.create({
             fontSize: 24,
             fontWeight: 'bold',
             color: '#1e3a8a',
+      },
+      gameCodeText: {
+            fontSize: 16,
+            color: '#4b5563',
+            marginTop: 5,
       },
       content: {
             flex: 1,
@@ -530,6 +544,40 @@ const styles = StyleSheet.create({
             color: 'white',
             fontWeight: 'bold',
       },
+      playerListContainer: {
+            marginTop: 20,
+            padding: 10,
+            backgroundColor: '#f1f5f9',
+            borderRadius: 8,
+      },
+      playerListTitle: {
+            fontSize: 16,
+            fontWeight: 'bold',
+            marginBottom: 10,
+      },
+      playerItem: {
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            paddingVertical: 5,
+            borderBottomWidth: 1,
+            borderBottomColor: '#e2e8f0',
+      },
+      playerName: {
+            fontSize: 14,
+            fontWeight: '500',
+      },
+      playerStatus: {
+            width: 12,
+            height: 12,
+            borderRadius: 6,
+      },
+      playerReady: {
+            backgroundColor: '#15803d',
+      },
+      playerNotReady: {
+            backgroundColor: '#dc2626',
+      },
       readyButton: {
             backgroundColor: '#15803d',
             padding: 16,
@@ -563,7 +611,7 @@ const styles = StyleSheet.create({
             textAlign: 'center',
             marginTop: 10,
       },
-      opponentReadyText: {
+      allReadyText: {
             color: '#15803d',
             fontWeight: 'bold',
             textAlign: 'center',
