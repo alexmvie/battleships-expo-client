@@ -30,6 +30,13 @@ const ShipPlacementScreen = ({ navigation, route }) => {
       // Flag to prevent duplicate navigation
       const navigatingToGameRef = useRef(false);
 
+      // Reset navigation flag when component unmounts
+      useEffect(() => {
+            return () => {
+                  navigatingToGameRef.current = false;
+            };
+      }, []);
+
       // Check orientation
       useEffect(() => {
             const updateOrientation = () => {
@@ -146,6 +153,16 @@ const ShipPlacementScreen = ({ navigation, route }) => {
                                                       timestamp: Date.now(),
                                                 });
 
+                                                // Set a flag to prevent duplicate navigation
+                                                if (navigatingToGameRef.current) {
+                                                      console.log(
+                                                            'Already navigating to Game screen, ignoring duplicate navigation attempt'
+                                                      );
+                                                      return;
+                                                }
+
+                                                navigatingToGameRef.current = true;
+
                                                 // Navigate to game screen after a short delay
                                                 setTimeout(() => {
                                                       navigation.navigate('Game', {
@@ -243,6 +260,9 @@ const ShipPlacementScreen = ({ navigation, route }) => {
                         if (connection) {
                               connection.onDataReceived = originalOnDataReceived;
                         }
+
+                        // Reset navigation flag on cleanup
+                        navigatingToGameRef.current = false;
                   };
             }
       }, [connection, board, gameCode, isHost, navigation, playerReady, opponentReady, handleVisibilityChange]);
@@ -327,8 +347,13 @@ const ShipPlacementScreen = ({ navigation, route }) => {
       };
 
       const handleReady = () => {
-            // Prevent multiple clicks
-            if (readyButtonDisabled || playerReady) return;
+            console.log('Ready button pressed. Current state:', { readyButtonDisabled, playerReady });
+
+            // Prevent multiple clicks - double protection
+            if (readyButtonDisabled || playerReady) {
+                  console.log('Button already disabled or player already ready, ignoring click');
+                  return;
+            }
 
             // Check if all ships are placed
             if (placedShips.length < Object.keys(SHIPS).length) {
@@ -336,8 +361,13 @@ const ShipPlacementScreen = ({ navigation, route }) => {
                   return;
             }
 
-            // Disable the button permanently once player is ready
+            // Disable the button IMMEDIATELY to prevent double clicks
             setReadyButtonDisabled(true);
+            console.log('Button disabled');
+
+            // Set player as ready FIRST to prevent race conditions
+            setPlayerReady(true);
+            console.log('Player marked as ready');
 
             // Send ready message to opponent
             if (connection) {
@@ -359,12 +389,11 @@ const ShipPlacementScreen = ({ navigation, route }) => {
 
                   if (!success) {
                         Alert.alert('Connection Issue', 'Unable to notify opponent. Please try again.');
+                        // Only reset if there's a connection issue
                         setReadyButtonDisabled(false);
+                        setPlayerReady(false);
                         return;
                   }
-
-                  // Set player as ready
-                  setPlayerReady(true);
 
                   // Show a message based on opponent status
                   if (opponentReady) {
