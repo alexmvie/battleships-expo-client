@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Share, Clipboard } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import SocketConnection from '../utils/socketConnection';
+import gameRoomController, { GAME_STATES } from '../controllers/GameRoomController';
 
 const GameSetupScreen = ({ navigation, route }) => {
       const { gameCode, isHost } = route.params;
@@ -220,6 +221,12 @@ const GameSetupScreen = ({ navigation, route }) => {
             } else if (data.type === 'start_game') {
                   console.log('Received start_game event, preparing to navigate to ShipPlacement...');
 
+                  // Generate a unique client ID
+                  const clientId = `client_${Date.now()}`;
+
+                  // Initialize the game room controller
+                  gameRoomController.initialize(connection, gameCode, isHost, clientId);
+
                   // Add a small delay before navigating to ensure the connection is stable
                   setTimeout(() => {
                         console.log('Navigating to ShipPlacement screen...');
@@ -227,6 +234,7 @@ const GameSetupScreen = ({ navigation, route }) => {
                               gameCode,
                               isHost,
                               connection,
+                              clientId,
                         });
                   }, 500);
             }
@@ -261,11 +269,21 @@ const GameSetupScreen = ({ navigation, route }) => {
 
       const handleStartGame = () => {
             if (connection) {
+                  // Generate a unique client ID
+                  const clientId = `client_${Date.now()}`;
+
+                  // Initialize the game room controller
+                  gameRoomController.initialize(connection, gameCode, isHost, clientId);
+
+                  // Send start_game message
                   connection.sendGameData({ type: 'start_game' });
+
+                  // Navigate to ship placement screen
                   navigation.navigate('ShipPlacement', {
                         gameCode,
                         isHost,
                         connection,
+                        clientId,
                   });
             }
       };
