@@ -61,6 +61,8 @@ A mobile-friendly multiplayer Battleship game built with React Native and Expo, 
 
 ### Client Deployment
 
+The client code is available at: https://github.com/alexmvie/battleships-expo-socket--client
+
 The client can be deployed to Expo or any other React Native hosting service.
 
 ### Server Deployment
