@@ -13,15 +13,16 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { SHIPS } from '../utils/gameState';
 import GameBoard from '../components/GameBoard';
-import gameRoomController, { GAME_STATES } from '../controllers/GameRoomController';
+import gameRoomController from '../controllers/GameRoomController';
+import { GAME_STATES, APP_VERSION, shortenId } from '../config/appConfig';
 
 const ShipPlacementScreen = ({ navigation, route }) => {
       const { gameCode, isHost, connection } = route.params;
       const window = useWindowDimensions();
-      
+
       // Generate a unique client ID
       const clientId = `client_${Date.now()}`;
-      
+
       // Local state
       const [board, setBoard] = useState(gameRoomController.getGameState().clients[clientId]?.board || null);
       const [selectedShip, setSelectedShip] = useState(SHIPS.CARRIER);
@@ -38,43 +39,43 @@ const ShipPlacementScreen = ({ navigation, route }) => {
       useEffect(() => {
             console.log('Initializing game room controller with gameCode:', gameCode, 'isHost:', isHost);
             gameRoomController.initialize(connection, gameCode, isHost, clientId);
-            
+
             // Set up event listeners
             gameRoomController.on('onClientJoined', (client) => {
                   console.log('Client joined:', client.id);
                   setClients(gameRoomController.getGameState().clients);
             });
-            
+
             gameRoomController.on('onClientLeft', (clientId) => {
                   console.log('Client left:', clientId);
                   setClients(gameRoomController.getGameState().clients);
-                  
+
                   Alert.alert('Player Left', 'A player has left the game.');
             });
-            
+
             gameRoomController.on('onClientReadyChanged', (clientId, ready) => {
                   console.log('Client ready changed:', clientId, ready);
                   setClients(gameRoomController.getGameState().clients);
-                  
+
                   if (clientId !== gameRoomController.localClientId && ready) {
                         Alert.alert('Player Ready', 'Another player is ready for battle!');
                   }
             });
-            
+
             gameRoomController.on('onAllClientsReady', () => {
                   console.log('All clients ready');
                   setAllPlayersReady(true);
-                  
+
                   if (isHost) {
                         Alert.alert('All Players Ready', 'All players are ready. You can start the battle!');
                   } else {
                         Alert.alert('All Players Ready', 'All players are ready. Waiting for host to start the game...');
                   }
             });
-            
+
             gameRoomController.on('onGameStateChanged', (state) => {
                   console.log('Game state changed:', state);
-                  
+
                   if (state === GAME_STATES.BATTLE) {
                         // Navigate to battle screen
                         setTimeout(() => {
@@ -87,20 +88,18 @@ const ShipPlacementScreen = ({ navigation, route }) => {
                         }, 1000);
                   }
             });
-            
+
             gameRoomController.on('onConnectionLost', () => {
-                  Alert.alert(
-                        'Connection Lost',
-                        'The connection to the other players was lost. Returning to home screen.',
-                        [{ text: 'OK', onPress: () => navigation.navigate('Home') }]
-                  );
+                  Alert.alert('Connection Lost', 'The connection to the other players was lost. Returning to home screen.', [
+                        { text: 'OK', onPress: () => navigation.navigate('Home') },
+                  ]);
             });
-            
+
             // Initialize local state from controller
             const gameState = gameRoomController.getGameState();
             setBoard(gameState.clients[clientId]?.board || null);
             setClients(gameState.clients);
-            
+
             // Clean up
             return () => {
                   // Reset event listeners
@@ -196,22 +195,22 @@ const ShipPlacementScreen = ({ navigation, route }) => {
 
       const handleCellPress = (row, col) => {
             if (!selectedShip) return;
-            
+
             // TODO: Implement ship placement using gameRoomController
             // For now, just update local state
             console.log('Placing ship at:', row, col);
-            
+
             // If successful, update placed ships
             setPlacedShips([...placedShips, selectedShip.id]);
-            
+
             // Select next ship or clear selection if all ships are placed
             if (placedShips.length + 1 >= Object.keys(SHIPS).length) {
                   setSelectedShip(null);
             } else {
                   // Find the next unplaced ship
-                  const shipIds = Object.values(SHIPS).map(ship => ship.id);
+                  const shipIds = Object.values(SHIPS).map((ship) => ship.id);
                   const nextUnplacedShip = Object.values(SHIPS).find(
-                        ship => !placedShips.includes(ship.id) && ship.id !== selectedShip.id
+                        (ship) => !placedShips.includes(ship.id) && ship.id !== selectedShip.id
                   );
                   setSelectedShip(nextUnplacedShip || null);
             }
@@ -232,41 +231,41 @@ const ShipPlacementScreen = ({ navigation, route }) => {
             setPlacedShips([]);
             setSelectedShip(SHIPS.CARRIER);
             setIsHorizontal(true);
-            
+
             // TODO: Reset board in gameRoomController
       };
 
       const handleReady = () => {
             console.log('Ready button pressed. Current state:', { readyButtonDisabled, playerReady });
-            
+
             // Prevent multiple clicks
             if (readyButtonDisabled || playerReady) {
                   console.log('Button already disabled or player already ready, ignoring click');
                   return;
             }
-            
+
             // Disable the button immediately
             setReadyButtonDisabled(true);
-            
+
             // Check if all ships are placed
             if (placedShips.length < Object.keys(SHIPS).length) {
                   Alert.alert('Not Ready', 'Please place all your ships before continuing.');
                   setReadyButtonDisabled(false);
                   return;
             }
-            
+
             // Mark player as ready in the controller
             const success = gameRoomController.markReady(true);
-            
+
             if (!success) {
                   Alert.alert('Connection Issue', 'Unable to notify other players. Please try again.');
                   setReadyButtonDisabled(false);
                   return;
             }
-            
+
             // Update local state
             setPlayerReady(true);
-            
+
             // Show a message
             Alert.alert('Ready!', 'Waiting for other players to be ready.');
       };
@@ -276,12 +275,12 @@ const ShipPlacementScreen = ({ navigation, route }) => {
                   Alert.alert('Not Host', 'Only the host can start the battle.');
                   return;
             }
-            
+
             if (!allPlayersReady) {
                   Alert.alert('Not Ready', 'All players must be ready before starting the battle.');
                   return;
             }
-            
+
             // Start the battle
             gameRoomController.startBattle();
       };
@@ -341,23 +340,25 @@ const ShipPlacementScreen = ({ navigation, route }) => {
                   <View style={styles.playerListContainer}>
                         <Text style={styles.playerListTitle}>Players:</Text>
                         {Object.values(clients).map((client) => (
-                              <View key={client.id} style={styles.playerItem}>
+                              <View
+                                    key={client.id}
+                                    style={styles.playerItem}
+                              >
                                     <Text style={styles.playerName}>
-                                          {client.id === clientId ? 'You' : `Player ${client.id.substring(0, 5)}`}
+                                          {client.id === clientId ? 'You' : `Player ${shortenId(client.id)}`}
                                           {client.isHost ? ' (Host)' : ''}
                                     </Text>
                                     <View
-                                          style={[
-                                                styles.playerStatus,
-                                                client.ready ? styles.playerReady : styles.playerNotReady,
-                                          ]}
+                                          style={[styles.playerStatus, client.ready ? styles.playerReady : styles.playerNotReady]}
                                     />
                               </View>
                         ))}
+                        <Text style={styles.clientIdText}>Your ID: {shortenId(clientId)}</Text>
+                        <Text style={styles.versionText}>v{APP_VERSION}</Text>
                   </View>
             );
       };
-      
+
       return (
             <SafeAreaView style={styles.container}>
                   <View style={styles.header}>
@@ -423,11 +424,9 @@ const ShipPlacementScreen = ({ navigation, route }) => {
                                           placedShips.length < Object.keys(SHIPS).length || readyButtonDisabled || playerReady
                                     }
                               >
-                                    <Text style={styles.readyButtonText}>
-                                          {playerReady ? 'READY!' : 'READY TO BATTLE!'}
-                                    </Text>
+                                    <Text style={styles.readyButtonText}>{playerReady ? 'READY!' : 'READY TO BATTLE!'}</Text>
                               </TouchableOpacity>
-                              
+
                               {isHost && allPlayersReady && (
                                     <TouchableOpacity
                                           style={[styles.startButton]}
@@ -577,6 +576,18 @@ const styles = StyleSheet.create({
       },
       playerNotReady: {
             backgroundColor: '#dc2626',
+      },
+      clientIdText: {
+            fontSize: 12,
+            color: '#4b5563',
+            marginTop: 10,
+            textAlign: 'center',
+      },
+      versionText: {
+            fontSize: 10,
+            color: '#6b7280',
+            marginTop: 5,
+            textAlign: 'center',
       },
       readyButton: {
             backgroundColor: '#15803d',

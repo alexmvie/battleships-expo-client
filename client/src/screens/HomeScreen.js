@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import gameRoomController from '../controllers/GameRoomController';
+import { APP_VERSION, SERVER_URL } from '../config/appConfig';
 
 const HomeScreen = ({ navigation }) => {
       const [gameCode, setGameCode] = useState('');
@@ -59,8 +60,9 @@ const HomeScreen = ({ navigation }) => {
 
                               <View style={styles.serverIndicator}>
                                     <Text style={styles.serverIndicatorText}>
-                                          Connected to: <Text style={styles.serverUrl}>battleships-expo-p2p.onrender.com</Text>
+                                          Connected to: <Text style={styles.serverUrl}>{SERVER_URL.replace('https://', '')}</Text>
                                     </Text>
+                                    <Text style={styles.versionText}>v{APP_VERSION}</Text>
                               </View>
 
                               <View style={styles.logoContainer}>
@@ -168,6 +170,12 @@ const styles = StyleSheet.create({
       },
       serverUrl: {
             fontWeight: 'bold',
+      },
+      versionText: {
+            color: 'white',
+            fontSize: 12,
+            marginTop: 4,
+            textAlign: 'center',
       },
       buttonsContainer: {
             width: '100%',

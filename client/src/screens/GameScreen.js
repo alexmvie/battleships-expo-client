@@ -3,7 +3,8 @@ import { View, Text, StyleSheet, TouchableOpacity, Alert, Animated, Dimensions, 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { SHIPS, CELL_STATE } from '../utils/gameState';
 import GameBoard from '../components/GameBoard';
-import gameRoomController, { GAME_STATES } from '../controllers/GameRoomController';
+import gameRoomController from '../controllers/GameRoomController';
+import { GAME_STATES, APP_VERSION, shortenId } from '../config/appConfig';
 
 const GameScreen = ({ navigation, route }) => {
       const { gameCode, isHost, connection, clientId } = route.params;
@@ -26,42 +27,42 @@ const GameScreen = ({ navigation, route }) => {
       // Initialize the game room controller
       useEffect(() => {
             console.log('GameScreen: Using game room controller with clientId:', clientId);
-            
+
             // Set up event listeners
             gameRoomController.on('onClientLeft', (leftClientId) => {
                   console.log('Client left:', leftClientId);
                   setClients(gameRoomController.getGameState().clients);
-                  
+
                   Alert.alert('Player Left', 'A player has left the game.');
             });
-            
+
             gameRoomController.on('onTurnChanged', (turnClientId) => {
                   console.log('Turn changed to:', turnClientId);
                   setCurrentTurnClientId(turnClientId);
             });
-            
+
             gameRoomController.on('onBoardUpdated', (clientId, board) => {
                   console.log('Board updated for client:', clientId);
                   setClients(gameRoomController.getGameState().clients);
             });
-            
+
             gameRoomController.on('onAttackResult', (targetClientId, row, col, hit, shipId, sunkShipId) => {
                   console.log('Attack result:', { targetClientId, row, col, hit, shipId, sunkShipId });
                   setClients(gameRoomController.getGameState().clients);
                   setLastAttack({ targetClientId, row, col });
-                  
+
                   // Show alert for sunk ship
                   if (sunkShipId) {
                         const shipName = Object.values(SHIPS).find((ship) => ship.id === sunkShipId)?.name;
                         Alert.alert('Ship Sunk!', `You sunk a ${shipName}!`);
                   }
             });
-            
+
             gameRoomController.on('onGameOver', (winnerId) => {
                   console.log('Game over, winner:', winnerId);
                   setGameOver(true);
                   setWinner(winnerId);
-                  
+
                   const isLocalPlayerWinner = winnerId === clientId;
                   Alert.alert(
                         isLocalPlayerWinner ? 'Victory!' : 'Defeat!',
@@ -69,27 +70,25 @@ const GameScreen = ({ navigation, route }) => {
                         [{ text: 'Return to Home', onPress: () => navigation.navigate('Home') }]
                   );
             });
-            
+
             gameRoomController.on('onConnectionLost', () => {
                   setConnectionLost(true);
-                  Alert.alert(
-                        'Connection Lost',
-                        'The connection to the other players was lost. The game cannot continue.',
-                        [{ text: 'Return to Home', onPress: () => navigation.navigate('Home') }]
-                  );
+                  Alert.alert('Connection Lost', 'The connection to the other players was lost. The game cannot continue.', [
+                        { text: 'Return to Home', onPress: () => navigation.navigate('Home') },
+                  ]);
             });
-            
+
             // Initialize local state from controller
             const gameState = gameRoomController.getGameState();
             setClients(gameState.clients);
             setCurrentTurnClientId(gameRoomController.getCurrentTurnClientId());
-            
+
             // Select the first opponent as the default target
-            const opponents = Object.values(gameState.clients).filter(c => c.id !== clientId);
+            const opponents = Object.values(gameState.clients).filter((c) => c.id !== clientId);
             if (opponents.length > 0) {
                   setSelectedTargetId(opponents[0].id);
             }
-            
+
             // Clean up
             return () => {
                   // Reset event listeners
@@ -212,13 +211,13 @@ const GameScreen = ({ navigation, route }) => {
             if (currentTurnClientId !== clientId || gameOver || connectionLost || reconnecting) {
                   return;
             }
-            
+
             // Can't attack if no target is selected
             if (!selectedTargetId) {
                   Alert.alert('No Target', 'Please select a target player first.');
                   return;
             }
-            
+
             // Attack the selected target
             gameRoomController.attackClient(selectedTargetId, row, col);
       };
@@ -229,7 +228,7 @@ const GameScreen = ({ navigation, route }) => {
 
       const renderTurnIndicator = () => {
             const isMyTurn = currentTurnClientId === clientId;
-            
+
             return (
                   <Animated.View
                         style={[
@@ -242,11 +241,9 @@ const GameScreen = ({ navigation, route }) => {
                         ]}
                   >
                         <Text style={styles.turnIndicatorText}>
-                              {isMyTurn 
-                                    ? 'YOUR TURN' 
-                                    : `${currentTurnClientId === clientId 
-                                          ? 'YOUR' 
-                                          : currentTurnClientId.substring(0, 5) + "'S"} TURN`}
+                              {isMyTurn
+                                    ? 'YOUR TURN'
+                                    : `${currentTurnClientId === clientId ? 'YOUR' : shortenId(currentTurnClientId) + "'S"} TURN`}
                         </Text>
                   </Animated.View>
             );
@@ -254,8 +251,8 @@ const GameScreen = ({ navigation, route }) => {
 
       const renderTargetSelector = () => {
             // Filter out the local client
-            const opponents = Object.values(clients).filter(client => client.id !== clientId);
-            
+            const opponents = Object.values(clients).filter((client) => client.id !== clientId);
+
             return (
                   <View style={styles.targetSelectorContainer}>
                         <Text style={styles.targetSelectorTitle}>Select Target:</Text>
@@ -269,12 +266,12 @@ const GameScreen = ({ navigation, route }) => {
                                           ]}
                                           onPress={() => handleTargetSelect(opponent.id)}
                                     >
-                                          <Text style={styles.targetButtonText}>
-                                                Player {opponent.id.substring(0, 5)}
-                                          </Text>
+                                          <Text style={styles.targetButtonText}>Player {shortenId(opponent.id)}</Text>
                                     </TouchableOpacity>
                               ))}
                         </View>
+                        <Text style={styles.clientIdText}>Your ID: {shortenId(clientId)}</Text>
+                        <Text style={styles.versionText}>v{APP_VERSION}</Text>
                   </View>
             );
       };
@@ -283,9 +280,7 @@ const GameScreen = ({ navigation, route }) => {
             return (
                   <View style={styles.sunkShipsContainer}>
                         <Text style={styles.sunkShipsTitle}>
-                              {client.id === clientId 
-                                    ? 'Your Sunk Ships:' 
-                                    : `Player ${client.id.substring(0, 5)}'s Sunk Ships:`}
+                              {client.id === clientId ? 'Your Sunk Ships:' : `Player ${shortenId(client.id)}'s Sunk Ships:`}
                         </Text>
                         <View style={styles.sunkShipsList}>
                               {Object.values(SHIPS).map((ship) => (
@@ -321,13 +316,13 @@ const GameScreen = ({ navigation, route }) => {
 
                   <View style={styles.content}>
                         {renderTargetSelector()}
-                        
+
                         <View style={[styles.boardsContainer, isLandscape && styles.boardsContainerLandscape]}>
                               <View style={styles.boardSection}>
                                     <Text style={styles.boardTitle}>
-                                          {selectedTargetId 
-                                                ? `PLAYER ${selectedTargetId.substring(0, 5)}'S WATERS` 
-                                                : "SELECT A TARGET"}
+                                          {selectedTargetId
+                                                ? `PLAYER ${shortenId(selectedTargetId)}'S WATERS`
+                                                : 'SELECT A TARGET'}
                                     </Text>
                                     {selectedTargetId && (
                                           <GameBoard
@@ -360,11 +355,7 @@ const GameScreen = ({ navigation, route }) => {
                   {(gameOver || connectionLost) && (
                         <View style={styles.gameOverContainer}>
                               <Text style={styles.gameOverText}>
-                                    {connectionLost 
-                                          ? 'CONNECTION LOST' 
-                                          : winner === clientId 
-                                                ? 'VICTORY!' 
-                                                : 'DEFEAT!'}
+                                    {connectionLost ? 'CONNECTION LOST' : winner === clientId ? 'VICTORY!' : 'DEFEAT!'}
                               </Text>
                               <Text style={styles.gameOverSubText}>
                                     {connectionLost
@@ -431,6 +422,18 @@ const styles = StyleSheet.create({
       targetButtonsContainer: {
             flexDirection: 'row',
             flexWrap: 'wrap',
+      },
+      clientIdText: {
+            fontSize: 12,
+            color: '#4b5563',
+            marginTop: 10,
+            textAlign: 'center',
+      },
+      versionText: {
+            fontSize: 10,
+            color: '#6b7280',
+            marginTop: 5,
+            textAlign: 'center',
       },
       targetButton: {
             backgroundColor: '#2563eb',
