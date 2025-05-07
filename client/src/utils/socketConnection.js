@@ -3,6 +3,7 @@
 // Client code repository: https://github.com/alexmvie/battleships-expo-socket--client
 import { io } from 'socket.io-client';
 import { Alert, Platform } from 'react-native';
+import { SERVER_URL } from '../config/appConfig';
 
 class SocketConnection {
       constructor(gameCode, isHost, onConnectionEstablished, onDataReceived, onDisconnect) {
@@ -26,7 +27,7 @@ class SocketConnection {
                   console.log('Initializing socket connection to server...');
 
                   // Connect to the deployed Socket.io server on Render.com
-                  const socketUrl = 'https://battleships-expo-p2p.onrender.com';
+                  const socketUrl = SERVER_URL;
                   console.log('Socket URL:', socketUrl);
 
                   // Use the exact same configuration that worked in our CORS test page
