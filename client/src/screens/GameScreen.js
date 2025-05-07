@@ -1,19 +1,20 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert, Animated, Dimensions, AppState } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { createEmptyBoard, processAttack, areAllShipsSunk, isShipSunk, SHIPS, CELL_STATE } from '../utils/gameState';
+import { SHIPS, CELL_STATE } from '../utils/gameState';
 import GameBoard from '../components/GameBoard';
+import battleController from '../controllers/BattleController';
 
 const GameScreen = ({ navigation, route }) => {
       const { isHost, connection, playerBoard } = route.params;
 
-      const [opponentBoard, setOpponentBoard] = useState(createEmptyBoard());
-      const [myBoard, setMyBoard] = useState(playerBoard);
-      const [isMyTurn, setIsMyTurn] = useState(isHost); // Host goes first
-      const [gameOver, setGameOver] = useState(false);
-      const [winner, setWinner] = useState(null);
-      const [lastAttack, setLastAttack] = useState(null);
-      const [sunkShips, setSunkShips] = useState({ player: [], opponent: [] });
+      const [opponentBoard, setOpponentBoard] = useState(battleController.getGameState().opponentBoard);
+      const [myBoard, setMyBoard] = useState(battleController.getGameState().playerBoard || playerBoard);
+      const [isMyTurn, setIsMyTurn] = useState(battleController.getGameState().isMyTurn);
+      const [gameOver, setGameOver] = useState(battleController.getGameState().gameOver);
+      const [winner, setWinner] = useState(battleController.getGameState().winner);
+      const [lastAttack, setLastAttack] = useState(battleController.getGameState().lastAttack);
+      const [sunkShips, setSunkShips] = useState(battleController.getGameState().sunkShips);
       const [reconnecting, setReconnecting] = useState(false);
       const [connectionLost, setConnectionLost] = useState(false);
       const [isLandscape, setIsLandscape] = useState(false);
@@ -21,6 +22,75 @@ const GameScreen = ({ navigation, route }) => {
       // Animation refs
       const fadeAnim = useRef(new Animated.Value(0)).current;
       const scaleAnim = useRef(new Animated.Value(0.5)).current;
+
+      // Initialize the battle controller
+      useEffect(() => {
+            console.log('Initializing battle controller with gameCode:', route.params.gameCode, 'isHost:', isHost);
+            battleController.initialize(connection, route.params.gameCode, isHost, playerBoard);
+            
+            // Set up event listeners
+            battleController.on('onPlayerBoardUpdated', (newBoard) => {
+                  setMyBoard(newBoard);
+            });
+            
+            battleController.on('onOpponentBoardUpdated', (newBoard) => {
+                  setOpponentBoard(newBoard);
+            });
+            
+            battleController.on('onTurnChanged', (isMyTurn) => {
+                  setIsMyTurn(isMyTurn);
+            });
+            
+            battleController.on('onGameOver', (didWin) => {
+                  setGameOver(true);
+                  setWinner(didWin ? 'player' : 'opponent');
+                  
+                  Alert.alert(
+                        didWin ? 'Victory!' : 'Defeat!', 
+                        didWin ? 'You sunk all enemy ships!' : 'All your ships were sunk!',
+                        [{ text: 'Return to Home', onPress: () => navigation.navigate('Home') }]
+                  );
+            });
+            
+            battleController.on('onLastAttackUpdated', (attack) => {
+                  setLastAttack(attack);
+            });
+            
+            battleController.on('onSunkShipsUpdated', (ships) => {
+                  setSunkShips(ships);
+                  
+                  // Show alert for sunk ship if it's a new opponent ship
+                  const opponentShips = ships.opponent;
+                  const prevOpponentShips = sunkShips.opponent;
+                  
+                  if (opponentShips.length > prevOpponentShips.length) {
+                        const newSunkShipId = opponentShips[opponentShips.length - 1];
+                        const shipName = Object.values(SHIPS).find((ship) => ship.id === newSunkShipId)?.name;
+                        Alert.alert('Ship Sunk!', `You sunk the opponent's ${shipName}!`);
+                  }
+            });
+            
+            battleController.on('onConnectionLost', () => {
+                  setConnectionLost(true);
+                  Alert.alert(
+                        'Connection Lost',
+                        'The connection to the other player was lost. The game cannot continue.',
+                        [{ text: 'Return to Home', onPress: () => navigation.navigate('Home') }]
+                  );
+            });
+            
+            // Clean up
+            return () => {
+                  // Reset event listeners
+                  battleController.on('onPlayerBoardUpdated', null);
+                  battleController.on('onOpponentBoardUpdated', null);
+                  battleController.on('onTurnChanged', null);
+                  battleController.on('onGameOver', null);
+                  battleController.on('onLastAttackUpdated', null);
+                  battleController.on('onSunkShipsUpdated', null);
+                  battleController.on('onConnectionLost', null);
+            };
+      }, [connection, isHost, navigation, playerBoard, route.params.gameCode, sunkShips.opponent]);
 
       // Check orientation
       useEffect(() => {
@@ -37,87 +107,49 @@ const GameScreen = ({ navigation, route }) => {
 
             return () => {
                   // Clean up listener
-                  // Note: In newer React Native versions, this would use .remove() instead
                   if (Dimensions.removeEventListener) {
                         Dimensions.removeEventListener('change', updateOrientation);
                   }
             };
       }, []);
 
+      // Set up AppState change listener
       useEffect(() => {
-            if (connection) {
-                  const originalOnDataReceived = connection.onDataReceived;
-
-                  connection.onDataReceived = (data) => {
-                        if (data.type === 'attack') {
-                              handleIncomingAttack(data.row, data.col);
-                        } else if (data.type === 'attack_result') {
-                              handleAttackResult(data);
-                        } else if (data.type === 'game_over') {
-                              handleGameOver(false); // Opponent won
-                        } else if (data.type === 'battle_start') {
-                              console.log('Received battle_start event');
-                              // Both players are ready to battle
-                              Alert.alert('Battle Started!', 'Both players are ready. The battle begins!');
-                        } else if (data.type === 'ping' || data.type === 'pong') {
-                              // Handle ping/pong internally in the connection class
-                              return;
-                        }
-
-                        // Call the original handler
-                        if (originalOnDataReceived) {
-                              originalOnDataReceived(data);
-                        }
-                  };
-
-                  // Set up AppState change listener for React Native
-                  let appStateSubscription;
-                  try {
-                        appStateSubscription = AppState.addEventListener('change', (nextAppState) => {
-                              if (nextAppState === 'active' && connection && !gameOver) {
-                                    console.log('App has come to the foreground, checking connection...');
-                                    handleVisibilityChange();
-                              }
-                        });
-                  } catch (error) {
-                        console.error('Error setting up AppState listener:', error);
-                        // Fallback for older React Native versions
-                        AppState.addEventListener('change', (nextAppState) => {
-                              if (nextAppState === 'active' && connection && !gameOver) {
-                                    console.log('App has come to the foreground, checking connection...');
-                                    handleVisibilityChange();
-                              }
-                        });
+            // Function to handle app state changes
+            const handleAppStateChange = (nextAppState) => {
+                  if (nextAppState === 'active' && connection) {
+                        console.log('App has come to the foreground, checking connection...');
+                        handleVisibilityChange();
                   }
+            };
 
-                  // Cleanup
-                  return () => {
-                        // Clean up the AppState subscription
-                        try {
-                              if (appStateSubscription?.remove) {
-                                    appStateSubscription.remove();
-                              } else if (AppState.removeEventListener) {
-                                    // For older versions of React Native
-                                    AppState.removeEventListener('change', (nextAppState) => {
-                                          if (nextAppState === 'active' && connection && !gameOver) {
-                                                handleVisibilityChange();
-                                          }
-                                    });
-                              }
-                        } catch (error) {
-                              console.error('Error cleaning up AppState listener:', error);
-                        }
-
-                        if (connection) {
-                              connection.onDataReceived = originalOnDataReceived;
-                        }
-                  };
+            // Add event listener - handle both newer and older React Native versions
+            let appStateSubscription;
+            if (AppState.addEventListener) {
+                  // Newer versions of React Native
+                  appStateSubscription = AppState.addEventListener('change', handleAppStateChange);
+            } else {
+                  // Older versions of React Native
+                  AppState.addEventListener('change', handleAppStateChange);
             }
-      }, [connection, gameOver, handleVisibilityChange]);
 
-      // Handle visibility changes for React Native
+            // Clean up the subscription
+            return () => {
+                  if (appStateSubscription?.remove) {
+                        // Newer versions of React Native
+                        appStateSubscription.remove();
+                  } else if (AppState.removeEventListener) {
+                        // Older versions of React Native
+                        AppState.removeEventListener('change', handleAppStateChange);
+                  }
+            };
+      }, [connection, handleVisibilityChange]);
+
+      // Handle tab visibility changes - modified for React Native
       const handleVisibilityChange = useCallback(() => {
-            if (connection && !gameOver) {
+            // In React Native, we don't have document.visibilityState
+            // This function is primarily for web, but we'll keep a simplified version for React Native
+            if (connection) {
                   console.log('Checking connection...');
                   // Send a ping to check if connection is still alive
                   const pingSuccess = connection.sendGameData({ type: 'ping', timestamp: Date.now() });
@@ -140,7 +172,7 @@ const GameScreen = ({ navigation, route }) => {
                         }, 5000);
                   }
             }
-      }, [connection, gameOver, reconnecting, navigation]);
+      }, [connection, reconnecting, navigation]);
 
       useEffect(() => {
             // Animate turn indicator
@@ -163,125 +195,13 @@ const GameScreen = ({ navigation, route }) => {
                   fadeAnim.setValue(0);
                   scaleAnim.setValue(0.5);
             };
-      }, [isMyTurn]);
+      }, [isMyTurn, fadeAnim, scaleAnim]);
 
       const handleCellPress = (row, col) => {
-            // Can only attack on your turn and if game is not over or connection lost
-            if (!isMyTurn || gameOver || connectionLost || reconnecting) return;
-
-            // Can't attack a cell that's already been attacked
-            if (opponentBoard[row][col].state === CELL_STATE.HIT || opponentBoard[row][col].state === CELL_STATE.MISS) {
-                  return;
-            }
-
-            // Send attack to opponent
-            if (connection) {
-                  const sendSuccess = connection.sendGameData({
-                        type: 'attack',
-                        row,
-                        col,
-                  });
-
-                  // If sending failed, show connection error
-                  if (!sendSuccess) {
-                        Alert.alert('Connection Issue', 'Unable to send your move. Checking connection...');
-                        return;
-                  }
-            }
-
-            // Temporarily disable turns until we get a response
-            setIsMyTurn(false);
-            setLastAttack({ row, col, board: 'opponent' });
-      };
-
-      const handleIncomingAttack = (row, col) => {
-            // Process the attack on our board using functional update to avoid stale state
-            setMyBoard((prevBoard) => {
-                  const result = processAttack(prevBoard, row, col);
-                  setLastAttack({ row, col, board: 'player' });
-
-                  // Check if a ship was sunk
-                  let sunkShipId = null;
-                  if (result.hit && result.shipId) {
-                        if (isShipSunk(result.board, result.shipId)) {
-                              sunkShipId = result.shipId;
-                              setSunkShips((prev) => ({
-                                    ...prev,
-                                    player: [...prev.player, result.shipId],
-                              }));
-                        }
-                  }
-
-                  // Send result back to opponent
-                  if (connection) {
-                        connection.sendGameData({
-                              type: 'attack_result',
-                              row,
-                              col,
-                              hit: result.hit,
-                              shipId: result.shipId,
-                              sunkShipId,
-                        });
-                  }
-
-                  // Check if all ships are sunk (game over)
-                  if (areAllShipsSunk(result.board)) {
-                        if (connection) {
-                              connection.sendGameData({
-                                    type: 'game_over',
-                              });
-                        }
-                        handleGameOver(false); // We lost
-                  } else {
-                        // It's our turn now
-                        setIsMyTurn(true);
-                  }
-
-                  return result.board;
-            });
-      };
-
-      const handleAttackResult = (data) => {
-            const { row, col, hit, shipId, sunkShipId } = data;
-
-            // Update opponent's board based on attack result using functional update
-            setOpponentBoard((prevBoard) => {
-                  const newBoard = [...prevBoard];
-                  newBoard[row][col] = {
-                        state: hit ? CELL_STATE.HIT : CELL_STATE.MISS,
-                        ship: shipId,
-                  };
-                  return newBoard;
-            });
-
-            // Update sunk ships
-            if (sunkShipId) {
-                  setSunkShips((prev) => ({
-                        ...prev,
-                        opponent: [...prev.opponent, sunkShipId],
-                  }));
-
-                  // Show alert for sunk ship
-                  const shipName = Object.values(SHIPS).find((ship) => ship.id === sunkShipId)?.name;
-                  Alert.alert('Ship Sunk!', `You sunk the opponent's ${shipName}!`);
-            }
-
-            // Check if all ships are sunk (game over)
-            if (sunkShips.opponent.length === Object.keys(SHIPS).length - 1 && sunkShipId) {
-                  handleGameOver(true); // We won
-            }
-      };
-
-      const handleGameOver = (didWin) => {
-            setGameOver(true);
-            setWinner(didWin ? 'player' : 'opponent');
-
-            Alert.alert(didWin ? 'Victory!' : 'Defeat!', didWin ? 'You sunk all enemy ships!' : 'All your ships were sunk!', [
-                  {
-                        text: 'Return to Home',
-                        onPress: () => navigation.navigate('Home'),
-                  },
-            ]);
+            // Use the battle controller to attack a cell
+            if (reconnecting || connectionLost) return;
+            
+            battleController.attackCell(row, col);
       };
 
       const renderTurnIndicator = () => {
@@ -333,7 +253,6 @@ const GameScreen = ({ navigation, route }) => {
                   </View>
             );
       };
-
       return (
             <SafeAreaView style={styles.container}>
                   <View style={styles.header}>
@@ -506,9 +425,10 @@ const styles = StyleSheet.create({
             backgroundColor: 'rgba(0, 0, 0, 0.7)',
             justifyContent: 'center',
             alignItems: 'center',
+            zIndex: 10,
       },
       gameOverText: {
-            fontSize: 36,
+            fontSize: 32,
             fontWeight: 'bold',
             color: 'white',
             marginBottom: 10,
@@ -516,20 +436,20 @@ const styles = StyleSheet.create({
       gameOverSubText: {
             fontSize: 18,
             color: 'white',
-            textAlign: 'center',
             marginBottom: 20,
+            textAlign: 'center',
             paddingHorizontal: 20,
       },
       newGameButton: {
             backgroundColor: '#15803d',
-            paddingVertical: 15,
-            paddingHorizontal: 30,
-            borderRadius: 10,
+            paddingVertical: 12,
+            paddingHorizontal: 24,
+            borderRadius: 8,
       },
       newGameButtonText: {
             color: 'white',
-            fontSize: 18,
             fontWeight: 'bold',
+            fontSize: 16,
       },
 });
 
