@@ -17,11 +17,8 @@ import gameRoomController from '../controllers/GameRoomController';
 import { GAME_STATES, APP_VERSION, shortenId } from '../config/appConfig';
 
 const ShipPlacementScreen = ({ navigation, route }) => {
-      const { gameCode, isHost, connection } = route.params;
+      const { gameCode, isHost, connection, clientId } = route.params;
       const window = useWindowDimensions();
-
-      // Generate a unique client ID
-      const clientId = `client_${Date.now()}`;
 
       // Local state
       const [board, setBoard] = useState(gameRoomController.getGameState().clients[clientId]?.board || null);
